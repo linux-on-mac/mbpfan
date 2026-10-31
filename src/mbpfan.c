@@ -82,6 +82,11 @@ t_sensors *sensors = NULL;
 t_fans *fans = NULL;
 char applesmc_path[PATH_MAX];
 char applesmc_fan_path[PATH_MAX];
+/* Linux >= 7.3: applesmc registers fans via hwmon_device_register_with_info().
+ * Attributes live in <applesmc>/hwmon/hwmonN/: fanN_target (was fanN_output) and
+ * pwmN_enable (1 = manual, 2 = SMC auto; was fanN_manual 1/0). */
+static bool hwmon_abi = false;
+static char applesmc_hwmon_path[PATH_MAX];
 
 
 char *smprintf(const char *fmt, ...)
@@ -294,9 +299,12 @@ t_fans *retrieve_fans()
 
     for (counter = 0; counter < NUM_FANS; counter++) {
 
-        path_output = smprintf("%s%d%s", path_begin, counter, path_output_end);
+        path_output = smprintf("%s%d%s", path_begin, counter, hwmon_abi ? "_target" : path_output_end);
         path_label = smprintf("%s%d%s", path_begin, counter, path_label_end);
-        path_manual = smprintf("%s%d%s", path_begin, counter, path_man_end);
+        if (hwmon_abi)
+            path_manual = smprintf("%s/pwm%d_enable", (const char *) &applesmc_hwmon_path, counter);
+        else
+            path_manual = smprintf("%s%d%s", path_begin, counter, path_man_end);
         path_fan_min = smprintf("%s%d%s", path_begin, counter, path_min_speed);
         path_fan_max = smprintf("%s%d%s", path_begin, counter, path_max_speed);
 
@@ -378,7 +386,7 @@ static void set_fans_mode(t_fans *fans, int mode)
         file = fopen(tmp->fan_manual_path, "rw+");
 
         if (file != NULL) {
-            fprintf(file, "%d", mode);
+            fprintf(file, "%d", hwmon_abi ? (mode ? 1 : 2) : mode);
             fclose(file);
         }
 
@@ -590,6 +598,29 @@ void check_requirements(const char *program_path)
     if (strlen(applesmc_path) != 0) {
         strncpy((char *) &applesmc_fan_path, (char *) &applesmc_path, PATH_MAX);
         strcat((char *) &applesmc_fan_path, "/fan");
+
+        /* new hwmon ABI (Linux >= 7.3): <applesmc>/hwmon/hwmonN/fan1_target */
+        char *hwmon_dir = smprintf("%s/hwmon", (const char *) &applesmc_path);
+        DIR *hdir = opendir(hwmon_dir);
+        if (hdir != NULL) {
+            struct dirent *hent;
+            while ((hent = readdir(hdir)) != NULL) {
+                if (strncmp("hwmon", hent->d_name, 5) != 0)
+                    continue;
+                char *probe = smprintf("%s/%s/fan1_target", hwmon_dir, hent->d_name);
+                if (access(probe, W_OK) == 0) {
+                    int n1 = snprintf((char *) &applesmc_hwmon_path, PATH_MAX, "%s/%s", hwmon_dir, hent->d_name);
+                    int n2 = snprintf((char *) &applesmc_fan_path, PATH_MAX, "%s/fan", (const char *) &applesmc_hwmon_path);
+                    hwmon_abi = n1 > 0 && n1 < PATH_MAX && n2 > 0 && n2 < PATH_MAX;
+                }
+                free(probe);
+                if (hwmon_abi)
+                    break;
+            }
+            closedir(hdir);
+        }
+        free(hwmon_dir);
+        if (verbose && hwmon_abi) mbp_log(LOG_INFO, "applesmc hwmon ABI: %s", (const char *) &applesmc_hwmon_path);
         if (verbose) mbp_log(LOG_INFO, "applesmc device path: %s", (char *) &applesmc_path);
 
     } else {
