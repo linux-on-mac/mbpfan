@@ -36,8 +36,8 @@
 
 int daemonize = 1;
 int verbose = 0;
-sig_atomic_t do_exit = 0;
-sig_atomic_t do_reload = 0;
+volatile sig_atomic_t do_exit = 0;
+volatile sig_atomic_t do_reload = 0;
 
 int write_pid(int pid)
 {

@@ -18,8 +18,8 @@
 
 #include <signal.h>
 
-extern sig_atomic_t do_exit;
-extern sig_atomic_t do_reload;
+extern volatile sig_atomic_t do_exit;
+extern volatile sig_atomic_t do_reload;
 
 /**
  * Write the PID of the forked daemon to the
