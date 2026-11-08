@@ -255,9 +255,12 @@ static int read_value(const char *path)
 
 static void read_value_str(const char *path, char *str, size_t len)
 {
+    str[0] = '\0';
     FILE *file = fopen(path, "r");
     if (file != NULL) {
-        fgets(str, len, file);
+        if (fgets(str, len, file) == NULL) {
+            str[0] = '\0';
+        }
         fclose(file);
     }
 }
