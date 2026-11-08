@@ -405,9 +405,11 @@ t_sensors *refresh_sensors(t_sensors *sensors)
     while (tmp != NULL) {
         if (tmp->file != NULL) {
             char buf[16];
-            int len = pread(fileno(tmp->file), buf, sizeof(buf), /*offset=*/0);
-            buf[len] = '\0';
-            tmp->temperature = strtod(buf, NULL);
+            ssize_t len = pread(fileno(tmp->file), buf, sizeof(buf) - 1, /*offset=*/0);
+            if (len >= 0) {
+                buf[len] = '\0';
+                tmp->temperature = strtod(buf, NULL);
+            }
         }
 
         tmp = tmp->next;
