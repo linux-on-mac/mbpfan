@@ -265,9 +265,10 @@ static void read_value_str(const char *path, char *str, size_t len)
 static void trim_trailing_whitespace(char *str)
 {
     for (ssize_t i = strlen(str) - 1; i >= 0; --i) {
-        if (isspace(str[i]) || str[i] == '\n') {
-            str[i] = '\0';
+        if (!isspace((unsigned char)str[i])) {
+            break;
         }
+        str[i] = '\0';
     }
 }
 
