@@ -23,6 +23,8 @@ struct s_fans {
     char *label;
     char *fan_output_path;
     char *fan_manual_path;
+    int fan_manual_on;  // value written to fan_manual_path to take control
+    int fan_manual_off; // value written to fan_manual_path to hand back to the SMC
     int step_up;
     int step_down;
     int fan_id;
