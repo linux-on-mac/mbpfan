@@ -82,6 +82,11 @@ t_sensors *sensors = NULL;
 t_fans *fans = NULL;
 char applesmc_path[PATH_MAX];
 char applesmc_fan_path[PATH_MAX];
+/* Newer kernels register applesmc through the hwmon core: the fan files move
+ * to <applesmc>/hwmon/hwmonN/, fanN_output becomes fanN_target and
+ * fanN_manual becomes pwmN_enable (1 = manual, 2 = automatic). */
+char applesmc_pwm_path[PATH_MAX];
+int applesmc_hwmon_layout = 0;
 
 
 char *smprintf(const char *fmt, ...)
@@ -287,7 +292,7 @@ t_fans *retrieve_fans()
     char *path_fan_min = NULL;
 
     const char *path_begin = (const char *) &applesmc_fan_path;
-    const char *path_output_end = "_output";
+    const char *path_output_end = applesmc_hwmon_layout ? "_target" : "_output";
     const char *path_label_end = "_label";
     const char *path_man_end = "_manual";
     const char *path_max_speed = "_max";
@@ -300,7 +305,11 @@ t_fans *retrieve_fans()
 
         path_output = smprintf("%s%d%s", path_begin, counter, path_output_end);
         path_label = smprintf("%s%d%s", path_begin, counter, path_label_end);
-        path_manual = smprintf("%s%d%s", path_begin, counter, path_man_end);
+        if (applesmc_hwmon_layout) {
+            path_manual = smprintf("%s%d_enable", (const char *) &applesmc_pwm_path, counter);
+        } else {
+            path_manual = smprintf("%s%d%s", path_begin, counter, path_man_end);
+        }
         path_fan_min = smprintf("%s%d%s", path_begin, counter, path_min_speed);
         path_fan_max = smprintf("%s%d%s", path_begin, counter, path_max_speed);
 
@@ -399,7 +408,7 @@ void set_fans_man(t_fans *fans)
 void set_fans_auto(t_fans *fans)
 {
 
-    set_fans_mode(fans, 0);
+    set_fans_mode(fans, applesmc_hwmon_layout ? 2 : 0);
 }
 
 t_sensors *refresh_sensors(t_sensors *sensors)
@@ -596,6 +605,36 @@ void check_requirements(const char *program_path)
     if (strlen(applesmc_path) != 0) {
         strncpy((char *) &applesmc_fan_path, (char *) &applesmc_path, PATH_MAX);
         strcat((char *) &applesmc_fan_path, "/fan");
+
+        /**
+        * Check for the hwmon layout, unless the legacy files are present
+        */
+        memset(&applesmc_pwm_path, 0, PATH_MAX);
+        char *legacy = smprintf("%s1_output", (char *) &applesmc_fan_path);
+        int has_legacy = access(legacy, F_OK) == 0;
+        free(legacy);
+        char *hwmon_root = smprintf("%s/hwmon", (char *) &applesmc_path);
+        dir = has_legacy ? NULL : opendir(hwmon_root);
+        if (dir != NULL) {
+            struct dirent *ent;
+            while ((ent = readdir(dir)) != NULL) {
+                if (strncmp("hwmon", (const char *) &ent->d_name, 5) != 0) {
+                    continue;
+                }
+                char *probe = smprintf("%s/%s/fan1_target", hwmon_root, (char *) &ent->d_name);
+                int found = access(probe, F_OK) == 0;
+                free(probe);
+                if (found) {
+                    snprintf((char *) &applesmc_fan_path, PATH_MAX, "%s/%s/fan", hwmon_root, (char *) &ent->d_name);
+                    snprintf((char *) &applesmc_pwm_path, PATH_MAX, "%s/%s/pwm", hwmon_root, (char *) &ent->d_name);
+                    applesmc_hwmon_layout = 1;
+                    break;
+                }
+            }
+            closedir(dir);
+        }
+        free(hwmon_root);
+        if (verbose && applesmc_hwmon_layout) mbp_log(LOG_INFO, "applesmc hwmon fan path: %s", (char *) &applesmc_fan_path);
         if (verbose) mbp_log(LOG_INFO, "applesmc device path: %s", (char *) &applesmc_path);
 
     } else {
