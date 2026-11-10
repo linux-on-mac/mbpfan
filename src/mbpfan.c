@@ -315,6 +315,14 @@ t_fans *retrieve_fans()
 
         FILE *file = fopen(path_output, "w");
 
+        if (file != NULL && applesmc_hwmon_layout && access(path_manual, W_OK) != 0) {
+            /* Without pwmN_enable the SMC stays in control and would ignore
+             * the speeds written to fanN_target. */
+            mbp_log(LOG_ERR, "Cannot write %s: %s. Ignoring fan %d.", path_manual, strerror(errno), counter);
+            fclose(file);
+            file = NULL;
+        }
+
         if (file != NULL) {
             fan = (t_fans *)malloc(sizeof(t_fans));
             fan->fan_output_path = strdup(path_output);
@@ -409,6 +417,25 @@ void set_fans_auto(t_fans *fans)
 {
 
     set_fans_mode(fans, applesmc_hwmon_layout ? 2 : 0);
+}
+
+/* The SMC does not keep the requested speed across a change of mode, so
+ * after the fans are put back in manual mode, e.g. on resume from suspend,
+ * the last speed has to be written again. */
+static void reapply_fan_speeds(t_fans *fans)
+{
+    t_fans *tmp = fans;
+
+    while (tmp != NULL) {
+        int speed = tmp->old_speed;
+
+        if (speed != 0) {
+            tmp->old_speed = 0;
+            set_fan_speed(tmp, speed);
+        }
+
+        tmp = tmp->next;
+    }
 }
 
 t_sensors *refresh_sensors(t_sensors *sensors)
@@ -773,6 +800,7 @@ recalibrate:
         if (after_sleep - before_sleep > 2 * polling_interval) {
             mbp_log(LOG_INFO, "Clock skew detected - slept for %ld seconds but expected %d", after_sleep - before_sleep, polling_interval);
             set_fans_man(fans);
+            reapply_fan_speeds(fans);
             goto recalibrate;
         }
     }
